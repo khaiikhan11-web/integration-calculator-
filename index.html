@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Integration Calculator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.js"></script>
+    <style>
+        :root {
+            --bg-color: #f8f9fa;
+            --panel-bg: #ffffff;
+            --primary-color: #2c3e50;
+            --accent-color: #3498db;
+            --border-color: #dcdde1;
+            --text-color: #2c3e50;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            display: flex;
+            height: 100vh;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            overflow: hidden;
+        }
+
+        /* Sidebar Control Panel */
+        #sidebar {
+            width: 350px;
+            background-color: var(--panel-bg);
+            border-right: 1px solid var(--border-color);
+            padding: 25px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.05);
+            z-index: 10;
+            overflow-y: auto;
+        }
+
+        h1 {
+            font-size: 1.4rem;
+            color: var(--primary-color);
+            margin-bottom: 10px;
+            border-bottom: 2px solid var(--accent-color);
+            padding-bottom: 8px;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #7f8c8d;
+            text-transform: uppercase;
+        }
+
+        input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        input:focus {
+            border-color: var(--accent-color);
+        }
+
+        .row {
+            display: flex;
+            gap: 15px;
+        }
+
+        .row .input-group {
+            flex: 1;
+        }
+
+        /* Results Display */
+        #results-panel {
+            background: #eef2f7;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid var(--accent-color);
+            margin-top: 10px;
+        }
+
+        .result-item {
+            margin-bottom: 8px;
+            font-size: 0.95rem;
+        }
+
+        .result-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .result-value {
+            font-weight: bold;
+            font-family: monospace;
+            font-size: 1.1rem;
+            color: #2c3e50;
+        }
+
+        .error {
+            color: #e74c3c;
+            font-size: 0.85rem;
+            margin-top: 5px;
+            display: none;
+        }
+
+        /* Graphing Canvas Container */
+        #canvas-container {
+            flex: 1;
+            position: relative;
+            background: #ffffff;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .instructions {
+            font-size: 0.8rem;
+            color: #95a5a6;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h1>Integration Calc</h1>
+        
+        <div class="input-group">
+            <label for="function-input">Function f(x)</label>
+            <input type="text" id="function-input" value="x^2 - 2x">
+            <div id="error-msg" class="error">Invalid math expression</div>
+        </div>
+
+        <div class="row">
+            <div class="input-group">
+                <label for="limit-a">Lower Limit (a)</label>
+                <input type="number" id="limit-a" value="0" step="any">
+            </div>
+            <div class="input-group">
+                <label for="limit-b">Upper Limit (b)</label>
+                <input type="number" id="limit-b" value="3" step="any">
+            </div>
+        </div>
+
+        <div id="results-panel">
+            <div class="result-item">
+                <div>Definite Integral:</div>
+                <div class="result-value" id="integral-val">0.00</div>
+            </div>
+        </div>
+
+        <div class="instructions">
+            <p><strong>Supported Formats:</strong></p>
+            <p>• Powers: <code>x^2</code>, <code>x^3</code></p>
+            <p>• Functions: <code>sin(x)</code>, <code>cos(x)</code>, <code>tan(x)</code>, <code>log(x)</code>, <code>exp(x)</code>, <code>sqrt(x)</code></p>
+            <p>• Operators: <code>*</code> (explicit multiplication required, e.g., <code>2*x</code> instead of <code>2x</code>)</p>
+            <p style="margin-top:10px;"><em>Drag grid to pan. Scroll wheel to zoom.</em></p>
+        </div>
+    </div>
+
+    <div id="canvas-container">
+        <canvas id="graphCanvas"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('graphCanvas');
+        const ctx = canvas.getContext('2d');
+        const funcInput = document.getElementById('function-input');
+        const inputA = document.getElementById('limit-a');
+        const inputB = document.getElementById('limit-b');
+        const integralVal = document.getElementById('integral-val');
+        const errorMsg = document.getElementById('error-msg');
+
+        // Viewport and Grid State
+        let config = {
+            offsetX: 0,       // Center offset X in pixels
+            offsetY: 0,       // Center offset Y in pixels
+            scaleX: 40,       // Pixels per unit X
+            scaleY: 40,       // Pixels per unit Y
+            isDragging: false,
+            startX: 0,
+            startY: 0
+        };
+
+        // Initialize Center Offsets
+        function initViewport() {
+            config.offsetX = canvas.width / 2;
+            config.offsetY = canvas.height / 2;
+        }
+
+        // Resize handler
+        function resizeCanvas() {
+            const rect = canvas.parentElement.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+            if (config.offsetX === 0 && config.offsetY === 0) {
+                initViewport();
+            }
+            draw();
+        }
+
+        // Convert Math Coordinate to Screen Coordinate
+        function toScreenX(x) { return config.offsetX + x * config.scaleX; }
+        function toScreenY(y) { return config.offsetY - y * config.scaleY; }
+
+        // Convert Screen Coordinate to Math Coordinate
+        function toMathX(screenX) { return (screenX - config.offsetX) / config.scaleX; }
+        function toMathY(screenY) { return (config.offsetY - screenY) / config.scaleY; }
+
+        // Safe Function Evaluator
+        function evaluateFunction(expr, x) {
+            try {
+                return expr.evaluate({ x: x });
+            } catch (e) {
+                return NaN;
+            }
+        }
+
+        // Calculate Simpson's Rule Approximation for the Definite Integral
+        function calculateIntegral(expr, a, b, n = 1000) {
+            if (a === b) return 0;
+            if (n % 2 !== 0) n++; // Simpson's rule requires even number of intervals
+            
+            const h = (b - a) / n;
+            let sum = evaluateFunction(expr, a) + evaluateFunction(expr, b);
+
+            for (let i = 1; i < n; i++) {
+                const x = a + i * h;
+                const val = evaluateFunction(expr, x);
+                if (isNaN(val) || !isFinite(val)) continue;
+                sum += (i % 2 === 0 ? 2 : 4) * val;
+            }
+            return (h / 3) * sum;
+        }
+
+        // Primary Drawing Pipeline
+        function draw() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const fText = funcInput.value;
+            let compiledExpr;
+            
+            try {
+                compiledExpr = math.compile(fText);
+                // Test evaluation to ensure validity
+                compiledExpr.evaluate({ x: 1 });
+                errorMsg.style.display = 'none';
+            } catch (e) {
+                errorMsg.style.display = 'block';
+                drawGrid();
+                drawAxes();
+                return; // Stop drawing graph if expression breaks
+            }
+
+            const a = parseFloat(inputA.value) || 0;
+            const b = parseFloat(inputB.value) || 0;
+
+            // Compute and display definite integral
+            const result = calculateIntegral(compiledExpr, a, b);
+            integralVal.textContent = isNaN(result) ? "Undefined" : result.toFixed(5);
+
+            drawGrid();
+            drawShadedArea(compiledExpr, a, b);
+            drawAxes();
+            drawGraph(compiledExpr);
+        }
+
+        // Draw Cartesian Grid Lines
+        function drawGrid() {
+            ctx.strokeStyle = '#f1f2f6';
+            ctx.lineWidth = 1;
+
+            // Determine spacing automatically based on zoom scale
+            let spacingX = 1;
+            if (config.scaleX < 20) spacingX = 5;
+            if (config.scaleX < 5) spacingX = 20;
+            if (config.scaleX > 100) spacingX = 0.5;
+
+            let spacingY = 1;
+            if (config.scaleY < 20) spacingY = 5;
+            if (config.scaleY < 5) spacingY = 20;
+            if (config.scaleY > 100) spacingY = 0.5;
+
+            // Vertical Grid lines
+            const minMathX = toMathX(0);
+            const maxMathX = toMathX(canvas.width);
+            let startGridX = Math.floor(minMathX / spacingX) * spacingX;
+            for (let x = startGridX; x <= maxMathX; x += spacingX) {
+                let sx = toScreenX(x);
+                ctx.beginPath();
+                ctx.moveTo(sx, 0);
+                ctx.lineTo(sx, canvas.height);
+                ctx.stroke();
+            }
+
+            // Horizontal Grid lines
+            const maxMathY = toMathY(0);
+            const minMathY = toMathY(canvas.height);
+            let startGridY = Math.floor(minMathY / spacingY) * spacingY;
+            for (let y = startGridY; y <= maxMathY; y += spacingY) {
+                let sy = toScreenY(y);
+                ctx.beginPath();
+                ctx.moveTo(0, sy);
+                ctx.lineTo(canvas.width, sy);
+                ctx.stroke();
+            }
+        }
+
+        // Draw X and Y Fixed Axes
+        function drawAxes() {
+            ctx.strokeStyle = '#718093';
+            ctx.lineWidth = 2;
+            ctx.fillStyle = '#718093';
+            ctx.font = '12px Arial';
+
+            // X Axis
+            if (config.offsetY >= 0 && config.offsetY <= canvas.height) {
+                ctx.beginPath();
+                ctx.moveTo(0, config.offsetY);
+                ctx.lineTo(canvas.width, config.offsetY);
+                ctx.stroke();
+            }
+
+            // Y Axis
+            if (config.offsetX >= 0 && config.offsetX <= canvas.width) {
+                ctx.beginPath();
+                ctx.moveTo(config.offsetX, 0);
+                ctx.lineTo(config.offsetX, canvas.height);
+                ctx.stroke();
+            }
+
+            // Label step markers along visible Axis bounds
+            ctx.fillText("0", config.offsetX + 5, config.offsetY + 15);
+        }
+
+        // Plot the main Function Curve
+        function drawGraph(expr) {
+            ctx.beginPath();
+            ctx.strokeStyle = '#e74c3c';
+            ctx.lineWidth = 3;
+
+            let first = true;
+            for (let sx = 0; sx < canvas.width; sx++) {
+                const mx = toMathX(sx);
+                const my = evaluateFunction(expr, mx);
+
+                if (isNaN(my) || !isFinite(my)) {
+                    first = true;
+                    continue;
+                }
+
+                const sy = toScreenY(my);
+
+                if (first) {
+                    ctx.moveTo(sx, sy);
+                    first = false;
+                } else {
+                    ctx.lineTo(sx, sy);
+                }
+            }
+            ctx.stroke();
+        }
+
+        // Shade the dynamic region between curves bounded by X limits [a, b]
+        function drawShadedArea(expr, a, b) {
+            if (a === b) return;
+            
+            ctx.fillStyle = 'rgba(52, 152, 219, 0.35)'; // Semi-transparent Blue Accent
+            ctx.beginPath();
+
+            const startX = Math.min(a, b);
+            const endX = Math.max(a, b);
+            
+            const startSx = Math.max(0, toScreenX(startX));
+            const endSx = Math.min(canvas.width, toScreenX(endX));
+
+            let initialized = false;
+
+            // Plot integration top boundary step-by-pixel inside bounds
+            for (let sx = startSx; sx <= endSx; sx++) {
+                const mx = toMathX(sx);
+                const my = evaluateFunction(expr, mx);
+
+                if (isNaN(my) || !isFinite(my)) continue;
+                const sy = toScreenY(my);
+
+                if (!initialized) {
+                    ctx.moveTo(sx, toScreenY(0));
+                    ctx.lineTo(sx, sy);
+                    initialized = true;
+                } else {
+                    ctx.lineTo(sx, sy);
+                }
+            }
+
+            if (initialized) {
+                ctx.lineTo(endSx, toScreenY(0));
+                ctx.closePath();
+                ctx.fill();
+            }
+        }
+
+        // --- Interaction Event Listeners ---
+
+        // Pan Controls (Mouse Dragging)
+        canvas.addEventListener('mousedown', (e) => {
+            config.isDragging = true;
+            config.startX = e.clientX - config.offsetX;
+            config.startY = e.clientY - config.offsetY;
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!config.isDragging) return;
+            config.offsetX = e.clientX - config.startX;
+            config.offsetY = e.clientY - config.startY;
+            draw();
+        });
+
+        window.addEventListener('mouseup', () => {
+            config.isDragging = false;
+        });
+
+        // Zoom Controls (Mouse Wheel)
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            
+            // Zoom Factor
+            const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+            
+            // Get mouse math coordinate before transformation to keep zoom focused on cursor
+            const mouseX = e.clientX - canvas.getBoundingClientRect().left;
+            const mouseY = e.clientY - canvas.getBoundingClientRect().top;
+            const mathX = toMathX(mouseX);
+            const mathY = toMathY(mouseY);
+
+            // Apply new zoom scale limits
+            config.scaleX = Math.max(2, Math.min(2000, config.scaleX * zoomFactor));
+            config.scaleY = Math.max(2, Math.min(2000, config.scaleY * zoomFactor));
+
+            // Adjust offsets to keep current target under mouse point
+            config.offsetX = mouseX - mathX * config.scaleX;
+            config.offsetY = mouseY + mathY * config.scaleY;
+
+            draw();
+        });
+
+        // Live calculation triggers on user key input loops
+        [funcInput, inputA, inputB].forEach(input => {
+            input.addEventListener('input', draw);
+        });
+
+        // Global Setup Hooks
+        window.addEventListener('resize', resizeCanvas);
+        
+        // Initial Draw Initialization
+        resizeCanvas();
+    </script>
+</body>
+</html>
